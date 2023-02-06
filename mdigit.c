@@ -264,19 +264,23 @@ void mul_m_n(uint32_t* u, uint32_t* v, uint32_t m, uint32_t n, uint32_t sign, ui
  */
 void mad_m_n(uint32_t* u, uint32_t* v, uint32_t m, uint32_t n, uint32_t sign, uint32_t* res)
 {
+    uint32_t second_carry = 0;
     for (int32_t i = n - 1; i >= 0; i--)
     {
         uint32_t carry = 0;
+        uint64_t add;
         for (int32_t j = m - 1; j >= 0; j--)
         {
-            uint64_t add = ((uint64_t) u[j]) * v[i] +
-                           ((uint64_t) carry) +
-                           ((uint64_t) res[i + j + 1]);
+            add = ((uint64_t) u[j]) * v[i] +
+                  ((uint64_t) carry) +
+                  ((uint64_t) res[i + j + 1]);
 
             res[i + j + 1] = add;
             carry = add >> 32;
         }
-        res[i] += carry;
+        add = (((uint64_t) res[i]) + carry) + second_carry;
+        res[i] = add;
+        second_carry = add >> 32;
     }
 
     if (sign)
