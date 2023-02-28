@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <alloca.h>
 #include "mdigit.h"
 
 uint64_t __udivmoddi4(uint64_t u, uint64_t v, uint64_t* r);
@@ -146,28 +147,6 @@ void add_m(uint32_t* a, uint32_t* b, uint32_t m, uint32_t* res)
 }
 
 /*
- * add m digit numbers and store it in m digit result.
- *
- * param in     a       operand 1
- * param in     b       operand 2
- * param in     c       operand 3
- * param in     m       number of digits of a and b and c
- * param out    res     result of a + b + c
- *
- */
-void add3_m(uint32_t* a, uint32_t* b, uint32_t* c, uint32_t m, uint32_t* res)
-{
-    uint32_t carry = 0;
-    for (int32_t i = m - 1; i >= 0; i--)
-    {
-        uint64_t add = ((((uint64_t) a[i]) + b[i]) + c[i]) + carry;
-        res[i] = add;
-        carry = add >> 32;
-    }
-}
-
-
-/*
  * subtract signed m digit numbers and store in m digit result
  *
  * param in     a       operand 1
@@ -252,65 +231,6 @@ void mul_m_n(uint32_t* u, uint32_t* v, uint32_t m, uint32_t n, uint32_t sign, ui
 }
 
 /*
- * multiply m by n digits and add the result to m + n digit result.
- *
- * param in         u       operand 1
- * param in         v       operand 2
- * param in         m       number of digits of u
- * param in         n       number of digits of v
- * param in         sign    if 0, usigned multiply, if 1 only u is signed, if 2 u and v are signed,
- * param in/out     res     m + n result. res = res + (u * v)
- *
- */
-void mad_m_n(uint32_t* u, uint32_t* v, uint32_t m, uint32_t n, uint32_t sign, uint32_t* res)
-{
-    uint32_t second_carry = 0;
-    for (int32_t i = n - 1; i >= 0; i--)
-    {
-        uint32_t carry = 0;
-        uint64_t add;
-        for (int32_t j = m - 1; j >= 0; j--)
-        {
-            add = ((uint64_t) u[j]) * v[i] +
-                  ((uint64_t) carry) +
-                  ((uint64_t) res[i + j + 1]);
-
-            res[i + j + 1] = add;
-            carry = add >> 32;
-        }
-        add = (((uint64_t) res[i]) + carry) + second_carry;
-        res[i] = add;
-        second_carry = add >> 32;
-    }
-
-    if (sign)
-    {
-        if (((int32_t) u[0]) < 0)
-        {
-            uint64_t sub;
-            uint32_t b = 0;
-            for (int32_t i = n - 1; i >= 0; i--)
-            {
-                sub = (((uint64_t) res[i]) - v[i]) - b;
-                res[i] = sub;
-                b = sub >> 63;
-            }
-        }
-        if (sign > 1 && ((int32_t) v[0]) < 0)
-        {
-            uint64_t sub;
-            uint32_t b = 0;
-            for (int32_t i = m - 1; i >= 0; i--)
-            {
-                sub = (((uint64_t) res[i]) - u[i]) - b;
-                res[i] = sub;
-                b = sub >> 63;
-            }
-        }
-    }
-}
-
-/*
  *  Divid unsigned m digit dividend by n digit divisor into
  *  m digit quotient and n digit reminder in base 2^32 with
  *  Knuth algorithm.
@@ -319,9 +239,8 @@ void mad_m_n(uint32_t* u, uint32_t* v, uint32_t m, uint32_t n, uint32_t sign, ui
  *
  *  notes:
  *
- *      1. n, m <= DIV_KNUTH_MAX_DIGITS
- *      2. if divisor is zero, function returns maximum value for
- *         reminder and quotient.
+ *      if divisor is zero, function returns maximum value for
+ *      reminder and quotient.
  *
  * param in     u           dividend
  * param in     v           divisor
@@ -404,8 +323,8 @@ void div_m_n(uint32_t* u,  uint32_t* v, uint32_t m, uint32_t n, uint32_t* q, uin
     /*
      * normalize
      */
-    uint32_t vn[DIV_KNUTH_MAX_DIGITS];
-    uint32_t un[DIV_KNUTH_MAX_DIGITS + 1]; // extra one digit for normalization overflow
+    uint32_t* vn = (uint32_t *) alloca(n * sizeof(uint32_t));
+    uint32_t* un = (uint32_t *) alloca((m + 1) * sizeof(uint32_t)); // extra one digit for normalization overflow
 
     // number of leading zeros.
     // max nlz is 31 since v[0] > 0;
@@ -525,41 +444,5 @@ void div_m_n(uint32_t* u,  uint32_t* v, uint32_t m, uint32_t n, uint32_t* q, uin
         }
 
         r[n_copy - n] = ((uint64_t) un[m - n + 1]) >> nlz;
-    }
-}
-
-/*
- * divide m digit by n digit and store the result
- * in k integer part + f fractional part digit quotient
- *
- * requires 1) m + f <= DIV_KNUTH_MAX_DIGITS
- *          2) k <= m
- *
- * param in     u       dividend
- * param in     v       divisor
- * param in     m       number of digits of u
- * param in     n       number of digits of v
- * param in     k       number of integer digits in q
- * param in     f       number of fractional digits in q
- * param out    q       quotient with k real digits and f fractional digits
- */
-void div_m_n_fract_k_f(uint32_t* u, uint32_t* v, uint32_t m, uint32_t n, uint32_t k, uint32_t f, uint32_t* q)
-{
-    // s = u << (32 * f)
-    uint32_t s[DIV_KNUTH_MAX_DIGITS];
-    for (uint32_t i = 0; i < m; i++)
-    {
-        s[i] = u[i];
-    }
-    for (uint32_t i = m; i < m + f; i++)
-    {
-        s[i] = 0;
-    }
-
-    div_m_n(s, v, m + f, n, s, NULL);
-
-    for (int32_t i = 0; i < k + f; i++)
-    {
-        q[k + f - i - 1] = s[m + f - i - 1];
     }
 }
